@@ -37,11 +37,13 @@ OBJ_GTK2?=$(patsubst %.c, $(GTK2_DIR)/%.o, $(SOURCES))
 OBJ_GTK3?=$(patsubst %.c, $(GTK3_DIR)/%.o, $(SOURCES))
 
 define compile
+	echo $(CC) $(CFLAGS) $1 $2 $< -c -o $@
 	$(CC) $(CFLAGS) $1 $2 $< -c -o $@
 endef
 
 define link
-	$(CC) $(LDFLAGS) $1 $2 $3 -o $@
+	echo $(CC) $(CFLAGS) $(LDFLAGS) $1 $2 $3 -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $1 $2 $3 -o $@
 endef
 
 # Builds both GTK+2 and GTK+3 versions of the plugin.
