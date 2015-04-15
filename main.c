@@ -55,9 +55,13 @@ on_searchentry_changed                 (GtkEditable     *editable,
     GtkEntry *entry = GTK_ENTRY (editable);
     const gchar *text = gtk_entry_get_text (entry);
     search_process (text);
+#if (DDB_API_LEVEL >= 8)
     deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_SELECTION, 0);
     deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_SEARCHRESULT, 0);
     deadbeef->sendmessage (DB_EV_FOCUS_SELECTION, 0, PL_MAIN, 0);
+#else
+    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, 0, 0);
+#endif
 }
 
 static int
