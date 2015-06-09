@@ -31,13 +31,22 @@ static DB_misc_t plugin;
 static DB_functions_t *deadbeef = NULL;
 static ddb_gtkui_t *gtkui_plugin = NULL;
 static GtkWidget *searchentry = NULL;
+static int resizetimer = 0;
 
 typedef struct {
     ddb_gtkui_widget_t base;
 } w_quick_search_t;
 
-static void
-search_process (const char *text) {
+static gboolean
+search_process (gpointer userdata) {
+    if (resizetimer) {
+        g_source_remove (resizetimer);
+        resizetimer = 0;
+    }
+
+    g_return_val_if_fail (userdata != NULL, FALSE);
+
+    const char *text = userdata;
     ddb_playlist_t *plt = deadbeef->plt_get_curr ();
     deadbeef->plt_search_process (plt, text);
     deadbeef->plt_unref (plt);
@@ -46,6 +55,14 @@ search_process (const char *text) {
     if (row >= deadbeef->pl_getcount (PL_SEARCH)) {
         deadbeef->pl_set_cursor (PL_SEARCH, deadbeef->pl_getcount (PL_SEARCH) - 1);
     }
+#if (DDB_API_LEVEL >= 8)
+    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_SELECTION, 0);
+    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_SEARCHRESULT, 0);
+    deadbeef->sendmessage (DB_EV_FOCUS_SELECTION, 0, PL_MAIN, 0);
+#else
+    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, 0, 0);
+#endif
+    return FALSE;
 }
 
 void
@@ -54,14 +71,11 @@ on_searchentry_changed                 (GtkEditable     *editable,
 {
     GtkEntry *entry = GTK_ENTRY (editable);
     const gchar *text = gtk_entry_get_text (entry);
-    search_process (text);
-#if (DDB_API_LEVEL >= 8)
-    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_SELECTION, 0);
-    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_SEARCHRESULT, 0);
-    deadbeef->sendmessage (DB_EV_FOCUS_SELECTION, 0, PL_MAIN, 0);
-#else
-    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, 0, 0);
-#endif
+    if (resizetimer) {
+        g_source_remove (resizetimer);
+        resizetimer = 0;
+    }
+    resizetimer = g_timeout_add (100, search_process, (void *)text);
 }
 
 static int
@@ -106,6 +120,10 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
 
 static void
 quick_search_destroy (ddb_gtkui_widget_t *w) {
+    if (resizetimer) {
+        g_source_remove (resizetimer);
+        resizetimer = 0;
+    }
 }
 
 static ddb_gtkui_widget_t *
@@ -147,9 +165,14 @@ quick_search_disconnect (void)
 // define plugin interface
 static DB_misc_t plugin = {
     .plugin.api_vmajor = 1,
-    .plugin.api_vminor = 5,
+    .plugin.api_vminor = 8,
     .plugin.version_major = 0,
     .plugin.version_minor = 1,
+#if GTK_CHECK_VERSION(3,0,0)
+    .plugin.id              = "quick_search-gtk3",
+#else
+    .plugin.id              = "quick_search",
+#endif
     .plugin.type = DB_PLUGIN_MISC,
     .plugin.name = "Quick search",
     .plugin.descr = "A widget to perform a quick search",
