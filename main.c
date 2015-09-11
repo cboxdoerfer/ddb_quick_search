@@ -190,7 +190,12 @@ on_searchentry_icon_press (GtkEntry            *entry,
                            gpointer             user_data)
 {
     w_quick_search_t *w = user_data;
-    gtk_menu_popup (GTK_MENU (w->popup), NULL, NULL, NULL, NULL, 0, gtk_get_current_event_time ());
+    if (icon_pos == GTK_ENTRY_ICON_PRIMARY) {
+        gtk_menu_popup (GTK_MENU (w->popup), NULL, NULL, NULL, NULL, 0, gtk_get_current_event_time ());
+    }
+    else {
+        gtk_entry_set_text (entry, "");
+    }
 }
 
 static void
@@ -330,16 +335,16 @@ quick_search_set_placeholder_text ()
 #if GTK_CHECK_VERSION(3,0,0)
     switch (config_search_in) {
         case SEARCH_INLINE:
-            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in playlist (inline)");
+            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in playlist (inline)...");
             break;
         case SEARCH_PLAYLIST:
-            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in playlist");
+            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in playlist...");
             break;
         case SEARCH_ALL_PLAYLISTS:
-            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in all playlists");
+            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in all playlists...");
             break;
         default:
-            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search");
+            gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search...");
             break;
     }
 #endif
@@ -479,7 +484,13 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     w_quick_search_t *w = (w_quick_search_t *)ww;
 
     searchentry = gtk_entry_new ();
+#if GTK_CHECK_VERSION(3,0,0)
     gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "edit-find-symbolic");
+    gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_SECONDARY, "edit-clear-symbolic");
+#else
+    gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "edit-find");
+    gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_SECONDARY, "edit-clear");
+#endif
     gtk_entry_set_invisible_char (GTK_ENTRY (searchentry), 8226);
     gtk_entry_set_activates_default (GTK_ENTRY (searchentry), TRUE);
     gtk_widget_show (searchentry);
