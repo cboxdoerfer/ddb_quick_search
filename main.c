@@ -433,7 +433,6 @@ quick_search_create_popup_menu (gpointer user_data)
             G_CALLBACK (on_autosearch_activate),
             NULL);
 
-
     if (config_search_in == SEARCH_INLINE) {
         gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (search_playlist_inline), TRUE);
     }
@@ -480,7 +479,7 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     w_quick_search_t *w = (w_quick_search_t *)ww;
 
     searchentry = gtk_entry_new ();
-    gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "edit-find");
+    gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "edit-find-symbolic");
     gtk_entry_set_invisible_char (GTK_ENTRY (searchentry), 8226);
     gtk_entry_set_activates_default (GTK_ENTRY (searchentry), TRUE);
     gtk_widget_show (searchentry);
