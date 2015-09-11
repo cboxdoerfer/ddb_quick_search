@@ -28,6 +28,10 @@
 //#define trace(...) { fprintf(stderr, __VA_ARGS__); }
 #define trace(fmt,...)
 
+#define CONFSTR_APPEND_SEARCH_STRING "quick_search.append_search_string"
+#define CONFSTR_SEARCH_IN "quick_search.search_in"
+#define CONFSTR_AUTOSEARCH "quick_search.autosearch"
+
 static DB_misc_t plugin;
 static DB_functions_t *deadbeef = NULL;
 static ddb_gtkui_t *gtkui_plugin = NULL;
@@ -43,7 +47,8 @@ enum search_in_mode_t {
 };
 
 static int config_search_in = SEARCH_INLINE;
-static int config_autosearch = 1;
+static int config_autosearch = TRUE;
+static int config_append_search_string = FALSE;
 
 typedef struct {
     ddb_gtkui_widget_t base;
@@ -73,14 +78,17 @@ get_last_active_playlist ()
 }
 
 static int
-get_quick_search_playlist (void) {
+get_quick_search_playlist () {
     // find existing one
     int plt_count = deadbeef->plt_get_count();
     for (int i = 0; i < plt_count; i++) {
         ddb_playlist_t *plt = deadbeef->plt_get_for_idx (i);
-        if (plt && is_quick_search_playlist (plt)) {
-            deadbeef->plt_clear (plt);
-            return i;
+        if (plt) {
+            if (is_quick_search_playlist (plt)) {
+                deadbeef->plt_unref (plt);
+                return i;
+            }
+            deadbeef->plt_unref (plt);
         }
     }
 
@@ -90,6 +98,48 @@ get_quick_search_playlist (void) {
     deadbeef->plt_add_meta (plt, "quick_search", "test");
     deadbeef->plt_unref (plt);
     return idx;
+}
+
+static void
+set_default_quick_search_playlist_title ()
+{
+    deadbeef->pl_lock ();
+    int plt_idx = get_quick_search_playlist ();
+    if (plt_idx >= 0) {
+        ddb_playlist_t *plt = deadbeef->plt_get_for_idx (plt_idx);
+        if (plt) {
+            char new_title[1024] = "";
+            snprintf (new_title, sizeof (new_title), "%s", "Quick Search");
+            deadbeef->plt_set_title (plt, new_title);
+            deadbeef->plt_unref (plt);
+        }
+    }
+    deadbeef->pl_unlock ();
+}
+
+static void
+append_search_string_to_plt_title (const char *search_string)
+{
+    if (!search_string) {
+        return;
+    }
+    deadbeef->pl_lock ();
+    int plt_idx = get_quick_search_playlist ();
+    if (plt_idx >= 0) {
+        ddb_playlist_t *plt = deadbeef->plt_get_for_idx (plt_idx);
+        if (plt) {
+            char new_title[1024] = "";
+            if (!strcmp (search_string, "")) {
+                snprintf (new_title, sizeof (new_title), "%s", "Quick Search");
+            }
+            else {
+                snprintf (new_title, sizeof (new_title), "%s [%s]", "Quick Search", search_string);
+            }
+            deadbeef->plt_set_title (plt, new_title);
+            deadbeef->plt_unref (plt);
+        }
+    }
+    deadbeef->pl_unlock ();
 }
 
 static void
@@ -136,12 +186,14 @@ on_add_quick_search_list ()
             deadbeef->plt_unref (plt_from);
             return;
         }
+        deadbeef->plt_clear (plt_to);
         copy_selected_tracks (plt_from, plt_to);
         if (plt_from) {
             deadbeef->plt_unref (plt_from);
         }
     }
     else if (config_search_in == SEARCH_ALL_PLAYLISTS) {
+        deadbeef->plt_clear (plt_to);
         int plt_count = deadbeef->plt_get_count ();
         for (int i = 0; i < plt_count; i++) {
             ddb_playlist_t *plt_from = deadbeef->plt_get_for_idx (i);
@@ -289,7 +341,7 @@ search_process (gpointer userdata) {
         for (int i = 0; i < plt_count; i++) {
             ddb_playlist_t *plt = deadbeef->plt_get_for_idx (i);
             if (plt && !is_quick_search_playlist (plt)) {
-                deadbeef->plt_deselect_all (plt); 
+                deadbeef->plt_deselect_all (plt);
                 deadbeef->plt_search_process (plt, text);
             }
             deadbeef->plt_unref (plt);
@@ -299,6 +351,10 @@ search_process (gpointer userdata) {
 
     update_list ();
     searchentry_perform_autosearch ();
+    if (config_append_search_string && config_search_in != SEARCH_INLINE) {
+        append_search_string_to_plt_title (text);
+    }
+
     return FALSE;
 }
 
@@ -362,7 +418,7 @@ static void
 on_search_playlist_inline_activate     (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
-    deadbeef->conf_set_int ("quick_search.search_in", SEARCH_INLINE);
+    deadbeef->conf_set_int (CONFSTR_SEARCH_IN, SEARCH_INLINE);
     deadbeef->sendmessage (DB_EV_CONFIGCHANGED, 0, 0, 0);
     config_search_in = SEARCH_INLINE;
     quick_search_set_placeholder_text ();
@@ -372,7 +428,7 @@ static void
 on_search_playlist_activate            (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
-    deadbeef->conf_set_int ("quick_search.search_in", SEARCH_PLAYLIST);
+    deadbeef->conf_set_int (CONFSTR_SEARCH_IN, SEARCH_PLAYLIST);
     deadbeef->sendmessage (DB_EV_CONFIGCHANGED, 0, 0, 0);
     config_search_in = SEARCH_PLAYLIST;
     quick_search_set_placeholder_text ();
@@ -382,7 +438,7 @@ static void
 on_search_all_playlists_activate       (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
-    deadbeef->conf_set_int ("quick_search.search_in", SEARCH_ALL_PLAYLISTS);
+    deadbeef->conf_set_int (CONFSTR_SEARCH_IN, SEARCH_ALL_PLAYLISTS);
     deadbeef->sendmessage (DB_EV_CONFIGCHANGED, 0, 0, 0);
     config_search_in = SEARCH_ALL_PLAYLISTS;
     quick_search_set_placeholder_text ();
@@ -392,8 +448,8 @@ static void
 on_autosearch_activate       (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
-    config_autosearch = config_autosearch ? 0 : 1;
-    deadbeef->conf_set_int ("quick_search.autosearch", config_autosearch);
+    config_autosearch = config_autosearch ? FALSE : TRUE;
+    deadbeef->conf_set_int (CONFSTR_AUTOSEARCH, config_autosearch);
     deadbeef->sendmessage (DB_EV_CONFIGCHANGED, 0, 0, 0);
 }
 
@@ -457,6 +513,26 @@ quick_search_create_popup_menu (gpointer user_data)
     }
 }
 
+static int
+quick_search_message (ddb_gtkui_widget_t *widget, uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2)
+{
+    w_quick_search_t *w = (w_quick_search_t *)widget;
+
+    switch (id) {
+        case DB_EV_CONFIGCHANGED:
+            config_search_in = deadbeef->conf_get_int (CONFSTR_SEARCH_IN, FALSE);
+            config_autosearch = deadbeef->conf_get_int (CONFSTR_AUTOSEARCH, TRUE);
+            config_append_search_string = deadbeef->conf_get_int (CONFSTR_APPEND_SEARCH_STRING, FALSE);
+
+            if (!config_append_search_string) {
+                set_default_quick_search_playlist_title ();
+            }
+            break;
+    }
+    return 0;
+}
+
+
 #if GTK_CHECK_VERSION(3,0,0)
 static DB_plugin_action_t
 quick_search_action_gtk3 = {
@@ -517,8 +593,9 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
             G_CALLBACK (on_searchentry_icon_press),
             w);
 
-    config_search_in = deadbeef->conf_get_int ("quick_search.search_in", 0);
-    config_autosearch = deadbeef->conf_get_int ("quick_search.autosearch", 1);
+    config_search_in = deadbeef->conf_get_int (CONFSTR_SEARCH_IN, FALSE);
+    config_autosearch = deadbeef->conf_get_int (CONFSTR_AUTOSEARCH, TRUE);
+    config_append_search_string = deadbeef->conf_get_int (CONFSTR_APPEND_SEARCH_STRING, FALSE);
     quick_search_set_placeholder_text ();
     quick_search_create_popup_menu (w);
 
@@ -545,6 +622,7 @@ w_quick_search_create (void) {
     w->base.widget = gtk_event_box_new ();
     w->base.destroy  = quick_search_destroy;
     w->base.init = quick_search_init;
+    w->base.message = quick_search_message;
     gtkui_plugin->w_override_signals (w->base.widget, w);
 
     return (ddb_gtkui_widget_t *)w;
@@ -565,6 +643,10 @@ quick_search_connect (void)
     }
     return -1;
 }
+
+static const char settings_dlg[] =
+    "property \"Append search string to playlist name \" checkbox " CONFSTR_APPEND_SEARCH_STRING " 0 ;\n"
+;
 
 static int
 quick_search_disconnect (void)
@@ -608,6 +690,7 @@ static DB_misc_t plugin = {
     .plugin.connect  = quick_search_connect,
     .plugin.disconnect  = quick_search_disconnect,
     .plugin.get_actions     = quick_search_get_actions,
+    .plugin.configdialog    = settings_dlg,
 };
 
 #if !GTK_CHECK_VERSION(3,0,0)
