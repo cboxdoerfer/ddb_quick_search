@@ -222,7 +222,11 @@ on_searchentry_key_press_event           (GtkWidget       *widget,
                                         GdkEventKey     *event,
                                         gpointer         user_data)
 {
+#if GTK_CHECK_VERSION(3,0,0)
     if (event->keyval == GDK_KEY_Return) {
+#else
+    if (event->keyval == GDK_Return) {
+#endif
         if (!config_autosearch) {
             GtkEntry *entry = GTK_ENTRY (widget);
             const gchar *text = gtk_entry_get_text (entry);
