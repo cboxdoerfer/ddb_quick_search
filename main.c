@@ -155,7 +155,11 @@ on_add_quick_search_list ()
     if (plt_to) {
         deadbeef->plt_unref (plt_to);
     }
+#if (DDB_API_LEVEL >= 8)
     deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_CONTENT, 0);
+#else
+    deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, 0, 0);
+#endif
 }
 
 static void
