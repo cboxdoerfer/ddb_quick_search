@@ -73,8 +73,21 @@ get_last_active_playlist ()
     }
     else {
         plt = last_active_plt;
+        deadbeef->plt_ref (plt);
     }
     return plt;
+}
+
+static void
+set_last_active_playlist (ddb_playlist_t *plt)
+{
+    if (!is_quick_search_playlist (plt) && plt != last_active_plt) {
+        if (last_active_plt) {
+            deadbeef->plt_unref (last_active_plt);
+        }
+        last_active_plt = plt;
+        deadbeef->plt_ref (last_active_plt);
+    }
 }
 
 static int
@@ -197,7 +210,10 @@ on_add_quick_search_list ()
         int plt_count = deadbeef->plt_get_count ();
         for (int i = 0; i < plt_count; i++) {
             ddb_playlist_t *plt_from = deadbeef->plt_get_for_idx (i);
-            if (plt_from && !is_quick_search_playlist (plt_from)) {
+            if (!plt_from) {
+                continue;
+            }
+            if (!is_quick_search_playlist (plt_from)) {
                 copy_selected_tracks (plt_from, plt_to);
             }
             deadbeef->plt_unref (plt_from);
@@ -326,17 +342,23 @@ search_process (gpointer userdata) {
         if (plt) {
             if (is_quick_search_playlist (plt)) {
                 deadbeef->plt_unref (plt);
-                plt = last_active_plt;
+                plt = get_last_active_playlist ();
             }
             else {
-                last_active_plt = plt;
+                set_last_active_playlist (plt);
             }
             if (plt) {
                 deadbeef->plt_search_process (plt, text);
+                deadbeef->plt_unref (plt);
             }
         }
     }
     else {
+        ddb_playlist_t *plt_curr = deadbeef->plt_get_curr ();
+        if (plt_curr) {
+            set_last_active_playlist (plt_curr);
+            deadbeef->plt_unref (plt_curr);
+        }
         int plt_count = deadbeef->plt_get_count ();
         for (int i = 0; i < plt_count; i++) {
             ddb_playlist_t *plt = deadbeef->plt_get_for_idx (i);
@@ -353,6 +375,14 @@ search_process (gpointer userdata) {
     searchentry_perform_autosearch ();
     if (config_append_search_string && config_search_in != SEARCH_INLINE) {
         append_search_string_to_plt_title (text);
+    }
+
+    if (config_autosearch && !strcmp (text, "")){
+        ddb_playlist_t *plt = get_last_active_playlist ();
+        if (plt) {
+            deadbeef->plt_set_curr (plt);
+            deadbeef->plt_unref (plt);
+        }
     }
 
     return FALSE;
