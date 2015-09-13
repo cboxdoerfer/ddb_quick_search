@@ -199,6 +199,7 @@ on_add_quick_search_list ()
             deadbeef->plt_unref (plt_from);
             return;
         }
+        deadbeef->plt_set_scroll (plt_to, 0);
         deadbeef->plt_clear (plt_to);
         copy_selected_tracks (plt_from, plt_to);
         if (plt_from) {
@@ -206,6 +207,7 @@ on_add_quick_search_list ()
         }
     }
     else if (config_search_in == SEARCH_ALL_PLAYLISTS) {
+        deadbeef->plt_set_scroll (plt_to, 0);
         deadbeef->plt_clear (plt_to);
         int plt_count = deadbeef->plt_get_count ();
         for (int i = 0; i < plt_count; i++) {
