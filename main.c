@@ -31,13 +31,18 @@
 #define CONFSTR_APPEND_SEARCH_STRING "quick_search.append_search_string"
 #define CONFSTR_SEARCH_IN "quick_search.search_in"
 #define CONFSTR_AUTOSEARCH "quick_search.autosearch"
+#define CONFSTR_HISTORY_SIZE "quick_search.history_size"
 
 static DB_misc_t plugin;
 static DB_functions_t *deadbeef = NULL;
 static ddb_gtkui_t *gtkui_plugin = NULL;
 static GtkWidget *searchentry = NULL;
-static int resizetimer = 0;
+static int search_delay_timer = 0;
 static ddb_playlist_t *last_active_plt = NULL;
+
+static gboolean new_plt_button_state = FALSE;
+static int added_plt_idx = -1;
+static int history_entries = 0;
 
 // search in modes
 enum search_in_mode_t {
@@ -49,24 +54,33 @@ enum search_in_mode_t {
 static int config_search_in = SEARCH_INLINE;
 static int config_autosearch = TRUE;
 static int config_append_search_string = FALSE;
+static int config_history_size = 10;
 
 typedef struct {
     ddb_gtkui_widget_t base;
     GtkWidget *popup;
+    GtkWidget *combo;
+    GtkWidget *new_plt_button;
+    GtkWidget *clear_history;
+    char *prev_query;
 } w_quick_search_t;
 
 static gboolean
 is_quick_search_playlist (ddb_playlist_t *plt)
 {
+    deadbeef->pl_lock ();
     if (plt && deadbeef->plt_find_meta (plt, "quick_search") != NULL) {
+        deadbeef->pl_unlock ();
         return TRUE;
     }
+    deadbeef->pl_unlock ();
     return FALSE;
 }
 
 static ddb_playlist_t *
 get_last_active_playlist ()
 {
+    deadbeef->pl_lock ();
     ddb_playlist_t *plt = NULL;
     if (!last_active_plt) {
         plt = deadbeef->plt_get_curr ();
@@ -75,12 +89,14 @@ get_last_active_playlist ()
         plt = last_active_plt;
         deadbeef->plt_ref (plt);
     }
+    deadbeef->pl_unlock ();
     return plt;
 }
 
 static void
 set_last_active_playlist (ddb_playlist_t *plt)
 {
+    deadbeef->pl_lock ();
     if (!is_quick_search_playlist (plt) && plt != last_active_plt) {
         if (last_active_plt) {
             deadbeef->plt_unref (last_active_plt);
@@ -88,17 +104,29 @@ set_last_active_playlist (ddb_playlist_t *plt)
         last_active_plt = plt;
         deadbeef->plt_ref (last_active_plt);
     }
+    deadbeef->pl_unlock ();
+}
+
+static int
+add_new_playlist (const char *title) {
+    if (!title) {
+        return -1;
+    }
+    int cnt = deadbeef->plt_get_count ();
+    return deadbeef->plt_add (cnt, title);
 }
 
 static int
 get_quick_search_playlist () {
     // find existing one
+    deadbeef->pl_lock ();
     int plt_count = deadbeef->plt_get_count();
     for (int i = 0; i < plt_count; i++) {
         ddb_playlist_t *plt = deadbeef->plt_get_for_idx (i);
         if (plt) {
             if (is_quick_search_playlist (plt)) {
                 deadbeef->plt_unref (plt);
+                deadbeef->pl_unlock ();
                 return i;
             }
             deadbeef->plt_unref (plt);
@@ -110,6 +138,7 @@ get_quick_search_playlist () {
     ddb_playlist_t *plt = deadbeef->plt_get_for_idx (idx);
     deadbeef->plt_add_meta (plt, "quick_search", "test");
     deadbeef->plt_unref (plt);
+    deadbeef->pl_unlock ();
     return idx;
 }
 
@@ -161,6 +190,7 @@ copy_selected_tracks (ddb_playlist_t *from, ddb_playlist_t *to)
     if (!from || !to) {
         return;
     }
+    deadbeef->pl_lock ();
     deadbeef->plt_set_curr (to);
 
     int sel_count = deadbeef->plt_get_sel_count (deadbeef->plt_get_idx (from));
@@ -185,46 +215,65 @@ copy_selected_tracks (ddb_playlist_t *from, ddb_playlist_t *to)
         }
         free (track_list);
     }
+    deadbeef->pl_unlock ();
 }
 
 static void
 on_add_quick_search_list ()
 {
-    int new_plt_idx = get_quick_search_playlist ();
+    deadbeef->pl_lock ();
+    int new_plt_idx = -1;
+    if (new_plt_button_state) {
+        if (added_plt_idx == -1) {
+            new_plt_idx = add_new_playlist ("Quick Search*");
+            added_plt_idx = new_plt_idx;
+        }
+        else {
+            new_plt_idx = added_plt_idx;
+        }
+    }
+    else {
+        new_plt_idx = get_quick_search_playlist ();
+        added_plt_idx = -1;
+    }
+
     ddb_playlist_t *plt_to = deadbeef->plt_get_for_idx (new_plt_idx);
 
-    if (config_search_in != SEARCH_ALL_PLAYLISTS) {
-        ddb_playlist_t *plt_from = get_last_active_playlist ();
-        if (is_quick_search_playlist (plt_from)) {
-            deadbeef->plt_unref (plt_from);
-            return;
-        }
-        deadbeef->plt_set_scroll (plt_to, 0);
-        deadbeef->plt_clear (plt_to);
-        copy_selected_tracks (plt_from, plt_to);
-        if (plt_from) {
-            deadbeef->plt_unref (plt_from);
-        }
-    }
-    else if (config_search_in == SEARCH_ALL_PLAYLISTS) {
-        deadbeef->plt_set_scroll (plt_to, 0);
-        deadbeef->plt_clear (plt_to);
-        int plt_count = deadbeef->plt_get_count ();
-        for (int i = 0; i < plt_count; i++) {
-            ddb_playlist_t *plt_from = deadbeef->plt_get_for_idx (i);
-            if (!plt_from) {
-                continue;
-            }
-            if (!is_quick_search_playlist (plt_from)) {
-                copy_selected_tracks (plt_from, plt_to);
-            }
-            deadbeef->plt_unref (plt_from);
-        }
-    }
-
     if (plt_to) {
+        if (config_search_in != SEARCH_ALL_PLAYLISTS) {
+            ddb_playlist_t *plt_from = get_last_active_playlist ();
+            if (plt_from) {
+                if (is_quick_search_playlist (plt_from)) {
+                    deadbeef->plt_unref (plt_from);
+                    deadbeef->plt_unref (plt_to);
+                    deadbeef->pl_unlock ();
+                    return;
+                }
+                deadbeef->plt_set_scroll (plt_to, 0);
+                deadbeef->plt_clear (plt_to);
+                copy_selected_tracks (plt_from, plt_to);
+                deadbeef->plt_unref (plt_from);
+            }
+        }
+        else if (config_search_in == SEARCH_ALL_PLAYLISTS) {
+            deadbeef->plt_set_scroll (plt_to, 0);
+            deadbeef->plt_clear (plt_to);
+            int plt_count = deadbeef->plt_get_count ();
+            for (int i = 0; i < plt_count; i++) {
+                ddb_playlist_t *plt_from = deadbeef->plt_get_for_idx (i);
+                if (!plt_from) {
+                    continue;
+                }
+                if (!is_quick_search_playlist (plt_from)) {
+                    copy_selected_tracks (plt_from, plt_to);
+                }
+                deadbeef->plt_unref (plt_from);
+            }
+        }
         deadbeef->plt_unref (plt_to);
     }
+    deadbeef->pl_unlock ();
+
 #if (DDB_API_LEVEL >= 8)
     deadbeef->sendmessage (DB_EV_PLAYLISTCHANGED, 0, DDB_PLAYLIST_CHANGE_CONTENT, 0);
 #else
@@ -236,6 +285,7 @@ static void
 on_searchentry_activate                (GtkEntry        *entry,
                                         gpointer         user_data)
 {
+    deadbeef->pl_lock ();
     ddb_playlist_t *plt = get_last_active_playlist ();
     if (plt) {
         DB_playItem_t *it = deadbeef->plt_get_first (plt, PL_MAIN);
@@ -255,6 +305,7 @@ on_searchentry_activate                (GtkEntry        *entry,
         }
         deadbeef->plt_unref (plt);
     }
+    deadbeef->pl_unlock ();
 }
 
 static void
@@ -269,6 +320,49 @@ on_searchentry_icon_press (GtkEntry            *entry,
     }
     else {
         gtk_entry_set_text (entry, "");
+    }
+}
+
+static void
+prepend_history_query (gpointer user_data, const char *text)
+{
+    if (!user_data || !text) {
+        return;
+    }
+    w_quick_search_t *w = user_data;
+
+    if (history_entries >= config_history_size) {
+        gtk_combo_box_text_remove (GTK_COMBO_BOX_TEXT (w->combo), config_history_size);
+    }
+    gtk_combo_box_text_prepend_text (GTK_COMBO_BOX_TEXT (w->combo), text);
+    gtk_widget_set_sensitive (GTK_WIDGET (w->clear_history), TRUE);
+    history_entries++;
+}
+
+static void
+add_history_entry (gpointer user_data)
+{
+    if (!user_data) {
+        return;
+    }
+    w_quick_search_t *w = user_data;
+    const gchar *text = gtk_entry_get_text (GTK_ENTRY (searchentry));
+    if (text) {
+        if (!strcmp (text, "")) {
+            return;
+        }
+        if (w->prev_query) {
+            if (strcmp (w->prev_query, text)) {
+                free (w->prev_query);
+                w->prev_query = NULL;
+                w->prev_query = strdup (text);
+                prepend_history_query (user_data, text);
+            }
+        }
+        else {
+            w->prev_query = strdup (text);
+            prepend_history_query (user_data, text);
+        }
     }
 }
 
@@ -296,6 +390,7 @@ on_searchentry_key_press_event           (GtkWidget       *widget,
                                         GdkEventKey     *event,
                                         gpointer         user_data)
 {
+    w_quick_search_t *w = (w_quick_search_t *)user_data;
 #if GTK_CHECK_VERSION(3,0,0)
     if (event->keyval == GDK_KEY_Return) {
 #else
@@ -304,15 +399,17 @@ on_searchentry_key_press_event           (GtkWidget       *widget,
         if (!config_autosearch) {
             GtkEntry *entry = GTK_ENTRY (widget);
             const gchar *text = gtk_entry_get_text (entry);
-            if (resizetimer) {
-                g_source_remove (resizetimer);
-                resizetimer = 0;
+            if (search_delay_timer) {
+                g_source_remove (search_delay_timer);
+                search_delay_timer = 0;
             }
-            resizetimer = g_timeout_add (100, search_process, (void *)text);
+            search_delay_timer = g_timeout_add (100, search_process, (void *)text);
         }
         else {
             on_searchentry_activate (NULL, 0);
         }
+        add_history_entry (user_data);
+        added_plt_idx = -1;
         return TRUE;
     }
     return FALSE;
@@ -331,9 +428,9 @@ update_list ()
 
 static gboolean
 search_process (gpointer userdata) {
-    if (resizetimer) {
-        g_source_remove (resizetimer);
-        resizetimer = 0;
+    if (search_delay_timer) {
+        g_source_remove (search_delay_timer);
+        search_delay_timer = 0;
     }
     g_return_val_if_fail (userdata != NULL, FALSE);
 
@@ -364,7 +461,10 @@ search_process (gpointer userdata) {
         int plt_count = deadbeef->plt_get_count ();
         for (int i = 0; i < plt_count; i++) {
             ddb_playlist_t *plt = deadbeef->plt_get_for_idx (i);
-            if (plt && !is_quick_search_playlist (plt)) {
+            if (!plt) {
+                continue;
+            }
+            if (!is_quick_search_playlist (plt)) {
                 deadbeef->plt_deselect_all (plt);
                 deadbeef->plt_search_process (plt, text);
             }
@@ -375,7 +475,7 @@ search_process (gpointer userdata) {
 
     update_list ();
     searchentry_perform_autosearch ();
-    if (config_append_search_string && config_search_in != SEARCH_INLINE) {
+    if (config_append_search_string && config_search_in != SEARCH_INLINE && !new_plt_button_state) {
         append_search_string_to_plt_title (text);
     }
 
@@ -397,12 +497,31 @@ on_searchentry_changed                 (GtkEditable     *editable,
     if (config_autosearch) {
         GtkEntry *entry = GTK_ENTRY (editable);
         const gchar *text = gtk_entry_get_text (entry);
-        if (resizetimer) {
-            g_source_remove (resizetimer);
-            resizetimer = 0;
+        if (search_delay_timer) {
+            g_source_remove (search_delay_timer);
+            search_delay_timer = 0;
         }
-        resizetimer = g_timeout_add (100, search_process, (void *)text);
+        search_delay_timer = g_timeout_add (100, search_process, (void *)text);
     }
+}
+
+static void
+on_new_plt_button_toggled (GtkToggleButton *togglebutton,
+                           gpointer         user_data)
+{
+    new_plt_button_state = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (togglebutton));
+}
+
+static gboolean
+on_searchentry_focus_out_event (GtkWidget *widget,
+                               GdkEvent  *event,
+                               gpointer   user_data)
+{
+    w_quick_search_t *w = user_data;
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (w->new_plt_button), FALSE);
+    added_plt_idx = -1;
+    add_history_entry (user_data);
+    return FALSE;
 }
 
 static gboolean
@@ -486,6 +605,20 @@ on_autosearch_activate       (GtkMenuItem     *menuitem,
 }
 
 static void
+on_clear_history_activate       (GtkMenuItem     *menuitem,
+                                        gpointer         user_data)
+{
+    w_quick_search_t *w = user_data;
+    if (history_entries) {
+        for (int i = 0; i < history_entries; i++) {
+            gtk_combo_box_text_remove (GTK_COMBO_BOX_TEXT (w->combo), 0);
+        }
+        history_entries = 0;
+        gtk_widget_set_sensitive (GTK_WIDGET (w->clear_history), FALSE);
+    }
+}
+
+static void
 quick_search_create_popup_menu (gpointer user_data)
 {
     w_quick_search_t *w = user_data;
@@ -505,7 +638,6 @@ quick_search_create_popup_menu (gpointer user_data)
     search_in_group = gtk_radio_menu_item_get_group (GTK_RADIO_MENU_ITEM (search_playlist_inline));
     gtk_widget_show (search_playlist_inline);
     gtk_container_add (GTK_CONTAINER (search_in_menu), search_playlist_inline);
-
     g_signal_connect ((gpointer) search_playlist_inline, "activate",
             G_CALLBACK (on_search_playlist_inline_activate),
             NULL);
@@ -533,6 +665,18 @@ quick_search_create_popup_menu (gpointer user_data)
     g_signal_connect ((gpointer) autosearch, "activate",
             G_CALLBACK (on_autosearch_activate),
             NULL);
+
+    GtkWidget *separator = gtk_separator_menu_item_new ();
+    gtk_widget_show (separator);
+    gtk_container_add (GTK_CONTAINER (w->popup), separator);
+
+    w->clear_history = gtk_menu_item_new_with_mnemonic ("Clear history");
+    gtk_widget_show (w->clear_history);
+    gtk_container_add (GTK_CONTAINER (w->popup), w->clear_history);
+    gtk_widget_set_sensitive (GTK_WIDGET (w->clear_history), history_entries);
+    g_signal_connect ((gpointer) w->clear_history, "activate",
+            G_CALLBACK (on_clear_history_activate),
+            user_data);
 
     if (config_search_in == SEARCH_INLINE) {
         gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (search_playlist_inline), TRUE);
@@ -599,6 +743,10 @@ static void
 quick_search_init (ddb_gtkui_widget_t *ww) {
     w_quick_search_t *w = (w_quick_search_t *)ww;
 
+    GtkWidget *hbox = gtk_hbox_new (FALSE, 3);
+    gtk_widget_show (hbox);
+    gtk_container_add (GTK_CONTAINER (w->base.widget), hbox);
+
     searchentry = gtk_entry_new ();
 #if GTK_CHECK_VERSION(3,0,0)
     gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "edit-find-symbolic");
@@ -609,21 +757,47 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
 #endif
     gtk_entry_set_invisible_char (GTK_ENTRY (searchentry), 8226);
     gtk_entry_set_activates_default (GTK_ENTRY (searchentry), TRUE);
+    gtk_entry_set_icon_tooltip_text (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "Preferences");
+    gtk_entry_set_icon_tooltip_text (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_SECONDARY, "Clear the search text");
     gtk_widget_show (searchentry);
 
-    gtk_container_add (GTK_CONTAINER (w->base.widget), searchentry);
+    w->combo = gtk_combo_box_text_new_with_entry ();
+    gtk_container_add (GTK_CONTAINER (hbox), w->combo);
+    gtk_container_remove (GTK_CONTAINER (w->combo), gtk_bin_get_child (GTK_BIN (w->combo)));
+    gtk_container_add (GTK_CONTAINER (w->combo), searchentry);
+    gtk_widget_show (w->combo);
+
+    w->new_plt_button = gtk_toggle_button_new ();
+    gtk_widget_show (w->new_plt_button);
+    gtk_box_pack_start (GTK_BOX (hbox), w->new_plt_button, FALSE, TRUE, 0);
+    gtk_widget_set_can_focus(w->new_plt_button, FALSE);
+    gtk_button_set_relief (GTK_BUTTON (w->new_plt_button), GTK_RELIEF_NORMAL);
+    gtk_widget_set_tooltip_text (w->new_plt_button, "Add results to new playlist");
+
+    GtkWidget *image2 = gtk_image_new_from_stock ("gtk-add", GTK_ICON_SIZE_BUTTON);
+    gtk_widget_show (image2);
+    gtk_container_add (GTK_CONTAINER (w->new_plt_button), image2);
+
+
     g_signal_connect ((gpointer) searchentry, "changed",
             G_CALLBACK (on_searchentry_changed),
             NULL);
     g_signal_connect ((gpointer) searchentry, "key_press_event",
             G_CALLBACK (on_searchentry_key_press_event),
-            NULL);
+            w);
     g_signal_connect ((gpointer) searchentry, "focus_in_event",
             G_CALLBACK (on_searchentry_focus_in_event),
             NULL);
+    g_signal_connect ((gpointer) searchentry, "focus_out_event",
+            G_CALLBACK (on_searchentry_focus_out_event),
+            w);
     g_signal_connect ((gpointer) searchentry, "icon_release",
             G_CALLBACK (on_searchentry_icon_press),
             w);
+    g_signal_connect ((gpointer) w->new_plt_button, "toggled",
+            G_CALLBACK (on_new_plt_button_toggled),
+            NULL);
+
 
     config_search_in = deadbeef->conf_get_int (CONFSTR_SEARCH_IN, FALSE);
     config_autosearch = deadbeef->conf_get_int (CONFSTR_AUTOSEARCH, TRUE);
@@ -636,13 +810,18 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
 
 static void
 quick_search_destroy (ddb_gtkui_widget_t *w) {
+    w_quick_search_t *ww = (w_quick_search_t *)w;
     if (last_active_plt) {
         deadbeef->plt_unref (last_active_plt);
         last_active_plt = NULL;
     }
-    if (resizetimer) {
-        g_source_remove (resizetimer);
-        resizetimer = 0;
+    if (ww->prev_query) {
+        free (ww->prev_query);
+        ww->prev_query = NULL;
+    }
+    if (search_delay_timer) {
+        g_source_remove (search_delay_timer);
+        search_delay_timer = 0;
     }
 }
 
@@ -678,6 +857,8 @@ quick_search_connect (void)
 
 static const char settings_dlg[] =
     "property \"Append search string to playlist name \" checkbox " CONFSTR_APPEND_SEARCH_STRING " 0 ;\n"
+    "property \"Append search string to playlist name \" checkbox " CONFSTR_APPEND_SEARCH_STRING " 0 ;\n"
+    "property \"History size: \" spinbtn[0,20,1] " CONFSTR_HISTORY_SIZE " 10 ;\n"
 ;
 
 static int

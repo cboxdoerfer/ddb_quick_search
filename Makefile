@@ -26,7 +26,7 @@ GTK2_LIBS?=`pkg-config --libs gtk+-2.0`
 GTK3_LIBS?=`pkg-config --libs gtk+-3.0`
 
 CC?=gcc
-CFLAGS+=-Wall -g -fPIC -std=c99 -D_GNU_SOURCE
+CFLAGS+=-Wall -g -O2 -fPIC -std=c99 -D_GNU_SOURCE
 LDFLAGS+=-shared
 
 GTK2_DIR?=gtk2
