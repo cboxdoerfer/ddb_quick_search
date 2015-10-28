@@ -41,8 +41,9 @@ static int search_delay_timer = 0;
 static ddb_playlist_t *last_active_plt = NULL;
 
 static gboolean new_plt_button_state = FALSE;
-static int added_plt_idx = -1;
+static ddb_playlist_t *added_plt = NULL;
 static int history_entries = 0;
+static const char *uuid = "779e2992-3e6e-40d4-9f2e-de06466142a0";
 
 // search in modes
 enum search_in_mode_t {
@@ -69,7 +70,8 @@ static gboolean
 is_quick_search_playlist (ddb_playlist_t *plt)
 {
     deadbeef->pl_lock ();
-    if (plt && deadbeef->plt_find_meta (plt, "quick_search") != NULL) {
+    if (plt && deadbeef->plt_find_meta (plt, "quick_search") != NULL
+            && !strcmp (deadbeef->plt_find_meta (plt, "quick_search"), uuid)) {
         deadbeef->pl_unlock ();
         return TRUE;
     }
@@ -86,8 +88,28 @@ get_last_active_playlist ()
         plt = deadbeef->plt_get_curr ();
     }
     else {
-        plt = last_active_plt;
-        deadbeef->plt_ref (plt);
+        // check if playlist got removed
+        int valid = 0;
+        int plt_count = deadbeef->plt_get_count();
+        for (int i = 0; i < plt_count; i++) {
+            ddb_playlist_t *plt_temp = deadbeef->plt_get_for_idx (i);
+            if (!plt_temp) {
+                continue;
+            }
+            if (plt_temp == last_active_plt) {
+                valid = 1;
+            }
+            deadbeef->plt_unref (plt_temp);
+        }
+        if (valid) {
+            plt = last_active_plt;
+            deadbeef->plt_ref (plt);
+        }
+        else {
+            deadbeef->plt_unref (last_active_plt);
+            last_active_plt = NULL;
+            plt = deadbeef->plt_get_curr ();
+        }
     }
     deadbeef->pl_unlock ();
     return plt;
@@ -136,7 +158,8 @@ get_quick_search_playlist () {
     // add new playlist
     int idx = deadbeef->plt_add (plt_count, "Quick Search");
     ddb_playlist_t *plt = deadbeef->plt_get_for_idx (idx);
-    deadbeef->plt_add_meta (plt, "quick_search", "test");
+    // use a uuid to identify quick_search list
+    deadbeef->plt_add_meta (plt, "quick_search", uuid);
     deadbeef->plt_unref (plt);
     deadbeef->pl_unlock ();
     return idx;
@@ -224,17 +247,20 @@ on_add_quick_search_list ()
     deadbeef->pl_lock ();
     int new_plt_idx = -1;
     if (new_plt_button_state) {
-        if (added_plt_idx == -1) {
+        if (added_plt == NULL) {
             new_plt_idx = add_new_playlist ("Quick Search*");
-            added_plt_idx = new_plt_idx;
+            added_plt = deadbeef->plt_get_for_idx (new_plt_idx);
         }
         else {
-            new_plt_idx = added_plt_idx;
+            new_plt_idx = deadbeef->plt_get_idx (added_plt);
         }
     }
     else {
         new_plt_idx = get_quick_search_playlist ();
-        added_plt_idx = -1;
+        if (added_plt) {
+            deadbeef->plt_unref (added_plt);
+            added_plt = NULL;
+        }
     }
 
     ddb_playlist_t *plt_to = deadbeef->plt_get_for_idx (new_plt_idx);
@@ -409,7 +435,10 @@ on_searchentry_key_press_event           (GtkWidget       *widget,
             on_searchentry_activate (NULL, 0);
         }
         add_history_entry (user_data);
-        added_plt_idx = -1;
+        if (added_plt) {
+            deadbeef->plt_unref (added_plt);
+            added_plt = NULL;
+        }
         return TRUE;
     }
     return FALSE;
@@ -519,7 +548,10 @@ on_searchentry_focus_out_event (GtkWidget *widget,
 {
     w_quick_search_t *w = user_data;
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (w->new_plt_button), FALSE);
-    added_plt_idx = -1;
+    if (added_plt) {
+        deadbeef->plt_unref (added_plt);
+        added_plt = NULL;
+    }
     add_history_entry (user_data);
     return FALSE;
 }
