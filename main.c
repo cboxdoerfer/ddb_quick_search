@@ -17,6 +17,8 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -44,6 +46,8 @@ static gboolean new_plt_button_state = FALSE;
 static ddb_playlist_t *added_plt = NULL;
 static int history_entries = 0;
 static const char *uuid = "779e2992-3e6e-40d4-9f2e-de06466142a0";
+static char cache_path[PATH_MAX];
+static int cache_path_size;
 
 // search in modes
 enum search_in_mode_t {
@@ -65,6 +69,107 @@ typedef struct {
     GtkWidget *clear_history;
     char *prev_query;
 } w_quick_search_t;
+
+static void
+add_history_query_to_combo (gpointer user_data, const char *text, int prepend);
+
+static int
+check_dir (const char *dir, mode_t mode)
+{
+    char *tmp = strdup (dir);
+    char *slash = tmp;
+    struct stat stat_buf;
+    do
+    {
+        slash = strstr (slash+1, "/");
+        if (slash)
+            *slash = 0;
+        if (-1 == stat (tmp, &stat_buf))
+        {
+            if (0 != mkdir (tmp, mode))
+            {
+                free (tmp);
+                return 0;
+            }
+        }
+        if (slash)
+            *slash = '/';
+    } while (slash);
+    free (tmp);
+    return 1;
+}
+
+static int
+make_cache_dir (char *path, int size)
+{
+    const char *cache_dir = deadbeef->get_system_dir (DDB_SYS_DIR_CACHE);
+    const int sz = snprintf (path, size, cache_dir ? "%s/quick_search/" : "%s/.cache/deadbeef/quick_search/", cache_dir ? cache_dir : getenv ("HOME"));
+    if (!check_dir (path, 0755)) {
+        return 0;
+    }
+    return sz;
+}
+
+static FILE *
+get_file_descriptor (const char *path, const char *fname, const char *mode)
+{
+    char full_path[PATH_MAX];
+    snprintf (full_path, sizeof (full_path), "%s%s", path, fname);
+    FILE *fp = fopen (full_path, mode);
+    if (!fp) {
+        return NULL;
+    }
+    return fp;
+}
+
+static void
+load_history_entries (gpointer user_data)
+{
+    w_quick_search_t *w = (w_quick_search_t *)user_data;
+    FILE *fp = get_file_descriptor (cache_path, "history", "r");
+    if (!fp) {
+        return;
+    }
+    char history[1024];
+    while (fgets (history, sizeof (history), fp)) {
+        char *ptr;
+        if ((ptr = strchr(history, '\n')) != NULL) {
+            *ptr = '\0';
+        }
+        if (strcmp (history, "")) {
+            add_history_query_to_combo (w, history, 0);
+        }
+    }
+    fclose (fp);
+}
+
+static void
+save_history_entries (gpointer user_data)
+{
+    w_quick_search_t *w = (w_quick_search_t *)user_data;
+    FILE *fp = get_file_descriptor (cache_path, "history", "w");
+    if (!fp) {
+        return;
+    }
+    GtkTreeModel *tree = gtk_combo_box_get_model (GTK_COMBO_BOX (w->combo));
+    if (tree) {
+        GtkTreeIter iter;
+        gboolean valid = gtk_tree_model_get_iter_first (tree, &iter);
+        while (valid) {
+            /* Walk through the list, reading each row */
+            gchar *str_data;
+            gtk_tree_model_get (tree, &iter, 0, &str_data, -1);
+            /* Do something with the data */
+            printf("%s\n", str_data);
+            if (strcmp (str_data, "")) {
+                fprintf (fp, "%s\n", str_data);
+            }
+            g_free (str_data);
+            valid = gtk_tree_model_iter_next (tree, &iter);
+        }
+    }
+    fclose (fp);
+}
 
 static gboolean
 is_quick_search_playlist (ddb_playlist_t *plt)
@@ -360,7 +465,7 @@ on_searchentry_icon_press (GtkEntry            *entry,
 }
 
 static void
-prepend_history_query (gpointer user_data, const char *text)
+add_history_query_to_combo (gpointer user_data, const char *text, int prepend)
 {
     if (!user_data || !text) {
         return;
@@ -370,8 +475,17 @@ prepend_history_query (gpointer user_data, const char *text)
     if (history_entries >= config_history_size) {
         gtk_combo_box_text_remove (GTK_COMBO_BOX_TEXT (w->combo), config_history_size);
     }
-    gtk_combo_box_text_prepend_text (GTK_COMBO_BOX_TEXT (w->combo), text);
-    gtk_widget_set_sensitive (GTK_WIDGET (w->clear_history), TRUE);
+
+    if (prepend) {
+        gtk_combo_box_text_prepend_text (GTK_COMBO_BOX_TEXT (w->combo), text);
+    }
+    else {
+        gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (w->combo), text);
+    }
+
+    if (!history_entries) {
+        gtk_widget_set_sensitive (GTK_WIDGET (w->clear_history), TRUE);
+    }
     history_entries++;
 }
 
@@ -392,12 +506,12 @@ add_history_entry (gpointer user_data)
                 free (w->prev_query);
                 w->prev_query = NULL;
                 w->prev_query = strdup (text);
-                prepend_history_query (user_data, text);
+                add_history_query_to_combo (user_data, text, 1);
             }
         }
         else {
             w->prev_query = strdup (text);
-            prepend_history_query (user_data, text);
+            add_history_query_to_combo (user_data, text, 1);
         }
     }
 }
@@ -781,6 +895,8 @@ static void
 quick_search_init (ddb_gtkui_widget_t *ww) {
     w_quick_search_t *w = (w_quick_search_t *)ww;
 
+    cache_path_size = make_cache_dir (cache_path, sizeof (cache_path));
+
     GtkWidget *hbox = gtk_hbox_new (FALSE, 3);
     gtk_widget_show (hbox);
     gtk_container_add (GTK_CONTAINER (w->base.widget), hbox);
@@ -804,6 +920,8 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     gtk_container_remove (GTK_CONTAINER (w->combo), gtk_bin_get_child (GTK_BIN (w->combo)));
     gtk_container_add (GTK_CONTAINER (w->combo), searchentry);
     gtk_widget_show (w->combo);
+
+    load_history_entries (w);
 
     w->new_plt_button = gtk_toggle_button_new ();
     gtk_widget_show (w->new_plt_button);
@@ -843,6 +961,7 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     quick_search_set_placeholder_text ();
     quick_search_create_popup_menu (w);
 
+
     initialized = 1;
 }
 
@@ -863,6 +982,12 @@ quick_search_destroy (ddb_gtkui_widget_t *w) {
     }
 }
 
+static void
+quick_search_save (struct ddb_gtkui_widget_s *w, char *s, int sz)
+{
+    save_history_entries (w);
+}
+
 static ddb_gtkui_widget_t *
 w_quick_search_create (void) {
     w_quick_search_t *w = malloc (sizeof (w_quick_search_t));
@@ -871,6 +996,7 @@ w_quick_search_create (void) {
     w->base.widget = gtk_event_box_new ();
     w->base.destroy  = quick_search_destroy;
     w->base.init = quick_search_init;
+    w->base.save = quick_search_save;
     w->base.message = quick_search_message;
     gtkui_plugin->w_override_signals (w->base.widget, w);
 
