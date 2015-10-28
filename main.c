@@ -159,8 +159,6 @@ save_history_entries (gpointer user_data)
             /* Walk through the list, reading each row */
             gchar *str_data;
             gtk_tree_model_get (tree, &iter, 0, &str_data, -1);
-            /* Do something with the data */
-            printf("%s\n", str_data);
             if (strcmp (str_data, "")) {
                 fprintf (fp, "%s\n", str_data);
             }
