@@ -183,26 +183,31 @@ set_default_quick_search_playlist_title ()
 }
 
 static void
-append_search_string_to_plt_title (const char *search_string)
+append_search_string_to_plt_title (ddb_playlist_t *plt, const char *search_string)
 {
-    if (!search_string) {
+    if (!search_string || !plt) {
         return;
     }
     deadbeef->pl_lock ();
-    int plt_idx = get_quick_search_playlist ();
-    if (plt_idx >= 0) {
-        ddb_playlist_t *plt = deadbeef->plt_get_for_idx (plt_idx);
-        if (plt) {
-            char new_title[1024] = "";
-            if (!strcmp (search_string, "")) {
+    if (plt) {
+        char new_title[1024] = "";
+        if (!strcmp (search_string, "")) {
+            if (new_plt_button_state) {
+                snprintf (new_title, sizeof (new_title), "%s", "New Playlist");
+            }
+            else {
                 snprintf (new_title, sizeof (new_title), "%s", "Quick Search");
+            }
+        }
+        else {
+            if (new_plt_button_state) {
+                snprintf (new_title, sizeof (new_title), "[%s]", search_string);
             }
             else {
                 snprintf (new_title, sizeof (new_title), "%s [%s]", "Quick Search", search_string);
             }
-            deadbeef->plt_set_title (plt, new_title);
-            deadbeef->plt_unref (plt);
         }
+        deadbeef->plt_set_title (plt, new_title);
     }
     deadbeef->pl_unlock ();
 }
@@ -296,6 +301,11 @@ on_add_quick_search_list ()
                 deadbeef->plt_unref (plt_from);
             }
         }
+        if (config_append_search_string && config_search_in != SEARCH_INLINE) {
+            const gchar *text = gtk_entry_get_text (GTK_ENTRY (searchentry));
+            append_search_string_to_plt_title (plt_to, text);
+        }
+
         deadbeef->plt_unref (plt_to);
     }
     deadbeef->pl_unlock ();
@@ -504,10 +514,6 @@ search_process (gpointer userdata) {
 
     update_list ();
     searchentry_perform_autosearch ();
-    if (config_append_search_string && config_search_in != SEARCH_INLINE && !new_plt_button_state) {
-        append_search_string_to_plt_title (text);
-    }
-
     if (config_autosearch && !strcmp (text, "")){
         ddb_playlist_t *plt = get_last_active_playlist ();
         if (plt) {
