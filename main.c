@@ -65,7 +65,6 @@ typedef struct {
     ddb_gtkui_widget_t base;
     GtkWidget *popup;
     GtkWidget *combo;
-    GtkWidget *new_plt_button;
     GtkWidget *clear_history;
     char *prev_query;
 } w_quick_search_t;
@@ -103,11 +102,13 @@ static int
 make_cache_dir (char *path, int size)
 {
     const char *cache_dir = deadbeef->get_system_dir (DDB_SYS_DIR_CACHE);
-    const int sz = snprintf (path, size, cache_dir ? "%s/quick_search/" : "%s/.cache/deadbeef/quick_search/", cache_dir ? cache_dir : getenv ("HOME"));
-    if (!check_dir (path, 0755)) {
-        return 0;
+    if (cache_dir) {
+        const int sz = snprintf (path, size, cache_dir ? "%s/quick_search/" : "%s/.cache/deadbeef/quick_search/", cache_dir ? cache_dir : getenv ("HOME"));
+        if (!check_dir (path, 0755)) {
+            return 0;
+        }
+        return sz;
     }
-    return sz;
 }
 
 static FILE *
@@ -421,6 +422,12 @@ on_add_quick_search_list ()
 }
 
 static void
+add_search_results_to_new_playlist (gpointer user_data)
+{
+    w_quick_search_t *w = (w_quick_search_t *)user_data;
+}
+
+static void
 on_searchentry_activate                (GtkEntry        *entry,
                                         gpointer         user_data)
 {
@@ -652,20 +659,11 @@ on_searchentry_changed                 (GtkEditable     *editable,
     }
 }
 
-static void
-on_new_plt_button_toggled (GtkToggleButton *togglebutton,
-                           gpointer         user_data)
-{
-    new_plt_button_state = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (togglebutton));
-}
-
 static gboolean
 on_searchentry_focus_out_event (GtkWidget *widget,
                                GdkEvent  *event,
                                gpointer   user_data)
 {
-    w_quick_search_t *w = user_data;
-    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (w->new_plt_button), FALSE);
     if (added_plt) {
         deadbeef->plt_unref (added_plt);
         added_plt = NULL;
@@ -919,19 +917,11 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     gtk_container_add (GTK_CONTAINER (w->combo), searchentry);
     gtk_widget_show (w->combo);
 
-    load_history_entries (w);
-
-    w->new_plt_button = gtk_toggle_button_new ();
-    gtk_widget_show (w->new_plt_button);
-    gtk_box_pack_start (GTK_BOX (hbox), w->new_plt_button, FALSE, TRUE, 0);
-    gtk_widget_set_can_focus(w->new_plt_button, FALSE);
-    gtk_button_set_relief (GTK_BUTTON (w->new_plt_button), GTK_RELIEF_NORMAL);
-    gtk_widget_set_tooltip_text (w->new_plt_button, "Add results to new playlist");
-
-    GtkWidget *image2 = gtk_image_new_from_stock ("gtk-add", GTK_ICON_SIZE_BUTTON);
-    gtk_widget_show (image2);
-    gtk_container_add (GTK_CONTAINER (w->new_plt_button), image2);
-
+    GtkEntryCompletion *completion = gtk_entry_completion_new ();
+    gtk_entry_set_completion (GTK_ENTRY (searchentry), completion);
+    g_object_unref (completion);
+    gtk_entry_completion_set_model (completion, gtk_combo_box_get_model (GTK_COMBO_BOX (w->combo)));
+    gtk_entry_completion_set_text_column (completion, 0);
 
     g_signal_connect ((gpointer) searchentry, "changed",
             G_CALLBACK (on_searchentry_changed),
@@ -948,17 +938,13 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     g_signal_connect ((gpointer) searchentry, "icon_release",
             G_CALLBACK (on_searchentry_icon_press),
             w);
-    g_signal_connect ((gpointer) w->new_plt_button, "toggled",
-            G_CALLBACK (on_new_plt_button_toggled),
-            NULL);
-
 
     config_search_in = deadbeef->conf_get_int (CONFSTR_SEARCH_IN, FALSE);
     config_autosearch = deadbeef->conf_get_int (CONFSTR_AUTOSEARCH, TRUE);
     config_append_search_string = deadbeef->conf_get_int (CONFSTR_APPEND_SEARCH_STRING, FALSE);
     quick_search_set_placeholder_text ();
     quick_search_create_popup_menu (w);
-
+    load_history_entries (w);
 
     initialized = 1;
 }
@@ -1018,7 +1004,6 @@ quick_search_connect (void)
 }
 
 static const char settings_dlg[] =
-    "property \"Append search string to playlist name \" checkbox " CONFSTR_APPEND_SEARCH_STRING " 0 ;\n"
     "property \"Append search string to playlist name \" checkbox " CONFSTR_APPEND_SEARCH_STRING " 0 ;\n"
     "property \"History size: \" spinbtn[0,20,1] " CONFSTR_HISTORY_SIZE " 10 ;\n"
 ;
