@@ -109,6 +109,7 @@ make_cache_dir (char *path, int size)
         }
         return sz;
     }
+    return 0;
 }
 
 static FILE *
@@ -422,12 +423,6 @@ on_add_quick_search_list ()
 }
 
 static void
-add_search_results_to_new_playlist (gpointer user_data)
-{
-    w_quick_search_t *w = (w_quick_search_t *)user_data;
-}
-
-static void
 on_searchentry_activate                (GtkEntry        *entry,
                                         gpointer         user_data)
 {
@@ -545,7 +540,6 @@ on_searchentry_key_press_event           (GtkWidget       *widget,
                                         GdkEventKey     *event,
                                         gpointer         user_data)
 {
-    w_quick_search_t *w = (w_quick_search_t *)user_data;
 #if GTK_CHECK_VERSION(3,0,0)
     if (event->keyval == GDK_KEY_Return) {
 #else
@@ -840,8 +834,6 @@ quick_search_create_popup_menu (gpointer user_data)
 static int
 quick_search_message (ddb_gtkui_widget_t *widget, uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2)
 {
-    w_quick_search_t *w = (w_quick_search_t *)widget;
-
     switch (id) {
         case DB_EV_CONFIGCHANGED:
             config_search_in = deadbeef->conf_get_int (CONFSTR_SEARCH_IN, FALSE);
