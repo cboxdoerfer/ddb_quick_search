@@ -27,6 +27,8 @@
 #include <deadbeef/deadbeef.h>
 #include <deadbeef/gtkui_api.h>
 
+#include "support.h"
+
 //#define trace(...) { fprintf(stderr, __VA_ARGS__); }
 #define trace(fmt,...)
 
