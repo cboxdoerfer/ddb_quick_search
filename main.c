@@ -689,7 +689,7 @@ quick_search_on_action (DB_plugin_action_t *action, int ctx)
 static void
 quick_search_set_placeholder_text ()
 {
-#if GTK_CHECK_VERSION(3,0,0)
+#if GTK_CHECK_VERSION(3,2,0)
     switch (config_search_in) {
         case SEARCH_INLINE:
             gtk_entry_set_placeholder_text (GTK_ENTRY (searchentry), "Search in playlist (inline)...");
