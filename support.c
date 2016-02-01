@@ -34,7 +34,7 @@ gtk_combo_box_text_get_active_text  (GtkComboBoxText *combo_box) {
 }
 
 void
-gtk_combo_box_text_remove_text (GtkComboBoxText *combo_box, gint position) {
+gtk_combo_box_text_remove (GtkComboBoxText *combo_box, gint position) {
     gtk_combo_box_remove_text (combo_box, position);
 }
 
