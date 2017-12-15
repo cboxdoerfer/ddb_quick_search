@@ -891,7 +891,9 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     gtk_widget_show (hbox);
     gtk_container_add (GTK_CONTAINER (w->base.widget), hbox);
 
-    searchentry = gtk_entry_new ();
+    w->combo = gtk_combo_box_text_new_with_entry ();
+    searchentry = gtk_bin_get_child (GTK_BIN (w->combo));
+
 #if GTK_CHECK_VERSION(3,0,0)
     gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_PRIMARY, "edit-find-symbolic");
     gtk_entry_set_icon_from_icon_name (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_SECONDARY, "edit-clear-symbolic");
@@ -905,10 +907,7 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
     gtk_entry_set_icon_tooltip_text (GTK_ENTRY (searchentry), GTK_ENTRY_ICON_SECONDARY, "Clear the search text");
     gtk_widget_show (searchentry);
 
-    w->combo = gtk_combo_box_text_new_with_entry ();
     gtk_container_add (GTK_CONTAINER (hbox), w->combo);
-    gtk_container_remove (GTK_CONTAINER (w->combo), gtk_bin_get_child (GTK_BIN (w->combo)));
-    gtk_container_add (GTK_CONTAINER (w->combo), searchentry);
     gtk_widget_show (w->combo);
 
     GtkEntryCompletion *completion = gtk_entry_completion_new ();
