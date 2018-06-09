@@ -767,6 +767,7 @@ quick_search_create_popup_menu (gpointer user_data)
 {
     w_quick_search_t *w = user_data;
     w->popup = gtk_menu_new ();
+    gtk_menu_attach_to_widget (GTK_MENU (w->popup), w->base.widget, NULL);
     gtk_widget_show (w->popup);
 
     GtkWidget *search_in = gtk_menu_item_new_with_mnemonic ("Search in");
