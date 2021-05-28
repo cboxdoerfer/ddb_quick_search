@@ -843,7 +843,7 @@ quick_search_message (ddb_gtkui_widget_t *widget, uint32_t id, uintptr_t ctx, ui
             config_autosearch = deadbeef->conf_get_int (CONFSTR_AUTOSEARCH, TRUE);
             config_append_search_string = deadbeef->conf_get_int (CONFSTR_APPEND_SEARCH_STRING, FALSE);
 
-            if (!config_append_search_string) {
+            if ((!config_append_search_string) && (config_search_in != SEARCH_INLINE)) {
                 set_default_quick_search_playlist_title ();
             }
             break;
@@ -961,6 +961,16 @@ quick_search_destroy (ddb_gtkui_widget_t *w) {
 }
 
 static void
+quick_search_cleanup () {
+    deadbeef->pl_lock();
+    int plt_idx = get_quick_search_playlist ();
+    if (plt_idx >= 0) {
+        deadbeef->plt_remove(plt_idx);
+    }
+    deadbeef->pl_unlock();
+}
+
+static void
 quick_search_save (struct ddb_gtkui_widget_s *w, char *s, int sz)
 {
     save_history_entries (w);
@@ -1005,6 +1015,7 @@ static const char settings_dlg[] =
 static int
 quick_search_disconnect (void)
 {
+    quick_search_cleanup();
     gtkui_plugin = NULL;
     return 0;
 }
