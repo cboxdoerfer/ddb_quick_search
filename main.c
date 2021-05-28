@@ -118,7 +118,10 @@ static FILE *
 get_file_descriptor (const char *path, const char *fname, const char *mode)
 {
     char full_path[PATH_MAX];
-    snprintf (full_path, sizeof (full_path), "%s%s", path, fname);
+    int ret = snprintf (full_path, sizeof (full_path), "%s%s", path, fname);
+    if (ret < 0)
+        return NULL;
+
     FILE *fp = fopen (full_path, mode);
     if (!fp) {
         return NULL;
@@ -459,7 +462,11 @@ on_searchentry_icon_press (GtkEntry            *entry,
 {
     w_quick_search_t *w = user_data;
     if (icon_pos == GTK_ENTRY_ICON_PRIMARY) {
+#if GTK_CHECK_VERSION(3,22,0)
+        gtk_menu_popup_at_pointer (GTK_MENU (w->popup), NULL);
+#else
         gtk_menu_popup (GTK_MENU (w->popup), NULL, NULL, NULL, NULL, 0, gtk_get_current_event_time ());
+#endif
     }
     else {
         gtk_entry_set_text (entry, "");
@@ -680,7 +687,11 @@ on_searchentry_focus_in_event (GtkWidget *widget,
 static int initialized = 0;
 
 static int
+#if (DDB_API_LEVEL >= 11)
+quick_search_on_action (DB_plugin_action_t *action, ddb_action_context_t ctx)
+#else
 quick_search_on_action (DB_plugin_action_t *action, int ctx)
+#endif
 {
     if (initialized && searchentry) {
         gtk_widget_grab_focus (searchentry);
@@ -843,7 +854,7 @@ quick_search_message (ddb_gtkui_widget_t *widget, uint32_t id, uintptr_t ctx, ui
             config_autosearch = deadbeef->conf_get_int (CONFSTR_AUTOSEARCH, TRUE);
             config_append_search_string = deadbeef->conf_get_int (CONFSTR_APPEND_SEARCH_STRING, FALSE);
 
-            if (!config_append_search_string) {
+            if ((!config_append_search_string) && (config_search_in != SEARCH_INLINE)) {
                 set_default_quick_search_playlist_title ();
             }
             break;
@@ -888,7 +899,12 @@ quick_search_init (ddb_gtkui_widget_t *ww) {
 
     cache_path_size = make_cache_dir (cache_path, sizeof (cache_path));
 
+#if GTK_CHECK_VERSION(3,2,0)
+    GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 3);
+    gtk_box_set_homogeneous (GTK_BOX(hbox), FALSE);
+#else
     GtkWidget *hbox = gtk_hbox_new (FALSE, 3);
+#endif
     gtk_widget_show (hbox);
     gtk_container_add (GTK_CONTAINER (w->base.widget), hbox);
 
@@ -961,6 +977,16 @@ quick_search_destroy (ddb_gtkui_widget_t *w) {
 }
 
 static void
+quick_search_cleanup () {
+    deadbeef->pl_lock();
+    int plt_idx = get_quick_search_playlist ();
+    if (plt_idx >= 0) {
+        deadbeef->plt_remove(plt_idx);
+    }
+    deadbeef->pl_unlock();
+}
+
+static void
 quick_search_save (struct ddb_gtkui_widget_s *w, char *s, int sz)
 {
     save_history_entries (w);
@@ -1005,6 +1031,7 @@ static const char settings_dlg[] =
 static int
 quick_search_disconnect (void)
 {
+    quick_search_cleanup();
     gtkui_plugin = NULL;
     return 0;
 }
